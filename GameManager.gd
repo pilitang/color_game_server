@@ -1,5 +1,5 @@
 extends Node
-
+#testtesttestetses123123123
 # Players记录所有玩家的信息，以id为key，字段有id，Username，localtion_room，score
 #var s_Players = {}
 #
