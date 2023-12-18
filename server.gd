@@ -38,7 +38,7 @@ func _physics_process(delta):
 	for key in GameManager.s_players:
 		#print(GameManager.s_players_room[key].id, GameManager.s_rooms)
 		#multiplayer.rpc(players_room[key].id,GameManager,"room_update",[rooms])
-		GameManager._set_room_by_frame.rpc_id(GameManager.s_players[key].id, GameManager.s_rooms,GameManager.s_players)
+		GameManager._set_room_by_frame.rpc_id(GameManager.s_players[key].id, GameManager.s_rooms,GameManager.s_players,GameManager.s_maps)
 		
 		
 func create_game():

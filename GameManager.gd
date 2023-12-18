@@ -15,6 +15,7 @@ const ERROR_GAME_ALREADY_STARTED: String = "Game already started"
 
 var s_rooms: Dictionary = {}
 var s_players: Dictionary = {}
+var s_maps: Dictionary = {}
 
 var c_rooms: Dictionary = {}
 var c_players: Dictionary = {}
@@ -28,6 +29,8 @@ enum { WAITING, STARTED }
 
 var timestamp = Time.get_datetime_string_from_system(false, true)
 	
+var map_data_path
+var my_map_data
 #@rpc("any_peer")
 #func join_room(room_name,id):
 #	Rooms[room_name]["room_players"].append(id)
@@ -84,11 +87,16 @@ func create_room(info: Dictionary) -> void:
 		players_in_room = {},
 		players_done = 0,
 		state = WAITING,
+		selected_map_file = "",
+		selected_map_data = {},
 		room_id = room_id
 	}
 	
 	
 	_add_player_to_room(room_id, sender_id, info)
+	# 设置客户端的提示语your roomX is created\nwaiting for the other player to join
+	var create_text = str("           your room") + str(room_id) + str(" is created\nwaiting for the other player to join")
+	change_create_text.rpc_id(sender_id, create_text)
 	print(str(timestamp) + " Room created by " + str(sender_id))
 
 #客户端 点击 发起，数据逻辑处理在服务端
@@ -105,7 +113,21 @@ func join_room(room_id: int, info: Dictionary) -> void:
 	#	get_tree().get_root().disconnect_peer(sender_id)
 	#else:
 	_add_player_to_room(room_id, sender_id, info)
+	
+	var room: Dictionary = _get_room(sender_id)
+	room.state = STARTED
+	# 通知客户端更新label显示
+	var client_control_label_str = str("Your room") + str(room.room_id) + " is matched. Please click Draw Map to continue."
+	# get_tree().root.get_children()[1].get_node("Label").text 
+	for player_id in room.players_in_room:
+		change_client_control.rpc_id(player_id, client_control_label_str)
+	
 
+@rpc("any_peer")
+func change_client_control(value):
+	get_tree().root.get_children()[1].get_node("Label").text = value
+	get_tree().root.get_children()[1].get_node("Host").visible = false
+	
 # 服务器端 更新数据
 func _add_player_to_room(room_id: int, id: int, info: Dictionary) -> void:
 	print("func add_player_to_room entered!")
@@ -134,8 +156,6 @@ func start_game() -> void:
 	
 	var room: Dictionary = _get_room(sender_id)
 	
-	room.state = STARTED
-	
 	for player_id in room.players_in_room:
 		StartGame.rpc_id(player_id)
 
@@ -146,16 +166,31 @@ func _get_room(player_id: int) -> Dictionary:
 ####Load Game here. And hide our connect menu 
 @rpc("any_peer")
 func StartGame():
+	var current_scene = get_tree().get_root().get_child(get_tree().get_root().get_child_count() - 1)
+	current_scene.queue_free()
 	var scene = load("res://Main.tscn").instantiate()
 	get_tree().root.add_child(scene)
 	get_tree().get_current_scene().hide()
+	
+	var my_unique_id: int = multiplayer.get_unique_id()
+	var room: Dictionary = _get_room(my_unique_id)
+	load_map_to_client_main(room.selected_map_data)
+	
 
 @rpc("any_peer")
-func _set_room_by_frame(rooms,players):
-	print(rooms)
+func load_map_to_client_main(map_data):
+	for key in map_data.map:
+		var item = map_data.map[key]
+		get_tree().get_root().get_child(get_tree().get_root().get_child_count() - 1).get_node("TileMap").set_cell(item.layer,item.coords,item.source_id,item.atlas_coords)
+
+
+@rpc("any_peer")
+func _set_room_by_frame(rooms,players,maps):
 	
 	if get_tree().current_scene.rooms!= rooms: 
-		get_tree().current_scene.rooms= rooms	
+		get_tree().current_scene.rooms= rooms
+	if get_tree().current_scene.maps!= maps: 
+		get_tree().current_scene.maps= maps	
 	c_rooms = rooms
 	c_players = players
 	
@@ -364,3 +399,49 @@ func logging_server(file_name,content):
 			file.seek_end()
 			file.store_line(json_string + "\n")
 			file.close()
+
+
+#----------------------------------save user map to server—-----------------------------------#
+@rpc("any_peer")
+func save_map_to_server(file_name,map_data):
+	var path = "user://" + file_name
+	var file = FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(var_to_str(map_data))
+	s_maps[path] = {
+		map_path = path
+	}
+	
+
+
+@rpc("any_peer")
+func load_map(path):
+	# 服务端读取地图数据，客户端根据服务器端传来的地图数据在本地渲染出来
+	var file = FileAccess.open(path, FileAccess.READ)
+	var content = file.get_as_text()
+	
+	my_map_data = str_to_var(content)
+	
+	var sender_id: int = multiplayer.get_remote_sender_id()
+	
+	var room: Dictionary = _get_room(sender_id)
+	room.selected_map_file = path
+	room.selected_map_data = my_map_data
+	
+	for player_id in room.players_in_room:
+		load_map_to_client.rpc_id(player_id,my_map_data)
+	
+
+@rpc("any_peer")
+func load_map_to_client(map_data):
+	var scene = load("res://user_setting.tscn").instantiate()
+	get_tree().root.add_child(scene)
+	get_tree().get_current_scene().hide()	
+	for key in map_data.map:
+		var item = map_data.map[key]
+		get_tree().get_root().get_child(get_tree().get_root().get_child_count() - 1).get_node("TileMap").set_cell(item.layer,item.coords,item.source_id,item.atlas_coords)
+
+	
+@rpc("any_peer")
+func change_create_text(create_text):
+	get_tree().root.get_children()[1].get_node("Label").text = create_text
+	
